@@ -26,15 +26,17 @@ setup(
         "openpyxl>=3.1.0",
         "lxml>=5.1.0",
         "xmltodict>=0.13.0",
-        "polars>=1.0.0",
-        "pyarrow>=14.0.0",
-        "orjson>=3.9.0",
-        "ijson>=3.2.0",
-        "python-calamine>=0.1.7",
-        "xlsxwriter>=3.1.0",
         "psutil>=5.9.0",
     ],
     extras_require={
+        "accel": [
+            "polars>=1.0.0",
+            "pyarrow>=14.0.0",
+            "orjson>=3.9.0",
+            "ijson>=3.2.0",
+            "python-calamine>=0.1.7",
+            "xlsxwriter>=3.1.0",
+        ],
         "dev": [
             "pytest>=8.1.1",
             "pytest-benchmark>=4.0.0",

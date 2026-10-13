@@ -42,7 +42,12 @@ import pytest
 import numpy as np
 import pandas as pd
 import openpyxl
-import xlsxwriter
+try:
+    import xlsxwriter
+    HAS_XLSXWRITER = True
+except ImportError:
+    xlsxwriter = None
+    HAS_XLSXWRITER = False
 import lxml.etree as ET
 
 from formatflick.formatflick import Formatflick, formatflick, STREAMING_THRESHOLD_BYTES
@@ -420,13 +425,21 @@ class TestHeavyLoadAndBoundedMemory:
         xlsx_path = tmp_path / "large_100k.xlsx"
         n_rows = 100000
 
-        # Create 100,000 row XLSX using constant_memory writer
-        wb = xlsxwriter.Workbook(str(xlsx_path), {"constant_memory": True})
-        ws = wb.add_worksheet()
-        ws.write_row(0, 0, ["id", "username", "amount", "flag"])
-        for i in range(1, n_rows + 1):
-            ws.write_row(i, 0, [i, f"user_{i}", i * 1.5, i % 2 == 0])
-        wb.close()
+        # Create 100,000 row XLSX using constant_memory writer or openpyxl write_only
+        if HAS_XLSXWRITER:
+            wb = xlsxwriter.Workbook(str(xlsx_path), {"constant_memory": True})
+            ws = wb.add_worksheet()
+            ws.write_row(0, 0, ["id", "username", "amount", "flag"])
+            for i in range(1, n_rows + 1):
+                ws.write_row(i, 0, [i, f"user_{i}", i * 1.5, i % 2 == 0])
+            wb.close()
+        else:
+            wb = openpyxl.Workbook(write_only=True)
+            ws = wb.create_sheet()
+            ws.append(["id", "username", "amount", "flag"])
+            for i in range(1, n_rows + 1):
+                ws.append([i, f"user_{i}", i * 1.5, i % 2 == 0])
+            wb.save(str(xlsx_path))
 
         assert xlsx_path.exists()
         file_size_mb = xlsx_path.stat().st_size / (1024 * 1024)

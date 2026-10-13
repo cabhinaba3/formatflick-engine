@@ -516,7 +516,9 @@ class XmlStreamWriter:
             row_ids = pd.Series(range(self.row_counter, self.row_counter + n), index=chunk.index, dtype=str)
         else:
             row_ids = pd.Series("row", index=chunk.index, dtype=str)
-        self.file.write(_format_chunk(chunk, row_ids).encode("utf-8"))
+        chunk_xml = _format_chunk(chunk, row_ids)
+        self.file.write(chunk_xml.encode("utf-8"))
+        del chunk_xml, row_ids
         self.row_counter += n
 
     def close(self) -> None:
@@ -565,6 +567,7 @@ def stream_convert(
     try:
         for chunk in reader:
             writer.write_chunk(chunk)
+            del chunk
     finally:
         writer.close()
     return str(destination)
