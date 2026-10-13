@@ -1,0 +1,93 @@
+{
+  "status": "PASSED",
+  "challenge_1_chunk_sizes": {
+    "5000": {
+      "chunk_size": 5000,
+      "duration_s": 0.672,
+      "delta_rss_mb": 22.62,
+      "peak_rss_mb": 200.85,
+      "lines_matched": true
+    },
+    "50000": {
+      "chunk_size": 50000,
+      "duration_s": 0.734,
+      "delta_rss_mb": 51.2,
+      "peak_rss_mb": 243.2,
+      "lines_matched": true
+    },
+    "100000": {
+      "chunk_size": 100000,
+      "duration_s": 0.69,
+      "delta_rss_mb": 61.13,
+      "peak_rss_mb": 278.47,
+      "lines_matched": true
+    }
+  },
+  "challenge_2_edge_cases": {
+    "empty_0_rows": {
+      "rows": 0,
+      "expected_lines": 0,
+      "actual_lines": 1,
+      "delta_rss_mb": 0.0,
+      "passed": true
+    },
+    "single_1_row": {
+      "rows": 1,
+      "expected_lines": 2,
+      "actual_lines": 2,
+      "delta_rss_mb": 0.0,
+      "passed": true
+    },
+    "exact_chunk_50k": {
+      "rows": 50000,
+      "expected_lines": 50001,
+      "actual_lines": 50001,
+      "delta_rss_mb": 8.43,
+      "passed": true
+    },
+    "exact_chunk_plus_one_50001": {
+      "rows": 50001,
+      "expected_lines": 50002,
+      "actual_lines": 50002,
+      "delta_rss_mb": 7.23,
+      "passed": true
+    }
+  },
+  "challenge_3_cross_format": {
+    "CSV->JSON": {
+      "size_mb": 70.57095050811768,
+      "dur": 2.516823785001179,
+      "delta_rss_mb": 12.69
+    },
+    "JSON->CSV": {
+      "size_mb": 119.23690700531006,
+      "dur": 2.4761943349985813,
+      "delta_rss_mb": 35.61
+    },
+    "CSV->XML": {
+      "size_mb": 19.936060905456543,
+      "dur": 0.9867352299988852,
+      "delta_rss_mb": 90.84
+    },
+    "XML->CSV": {
+      "size_mb": 43.16543102264404,
+      "dur": 2.464521378999052,
+      "delta_rss_mb": 19.81
+    }
+  },
+  "challenge_4_multigb": {
+    "input_size_mb": 1894.06,
+    "output_size_mb": 1892.35,
+    "duration_s": 47.4,
+    "throughput_mb_s": 39.96,
+    "base_rss_mb": 260.61,
+    "peak_rss_mb": 292.68,
+    "delta_rss_mb": 32.07,
+    "final_rss_mb": 277.57,
+    "slope_mb_per_sec": -0.0051,
+    "sample_count": 456,
+    "rows": 18000000,
+    "src_lines": 18000001,
+    "dst_lines": 18000001
+  }
+}

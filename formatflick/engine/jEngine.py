@@ -1,10 +1,24 @@
 from typing import Tuple, List, Any, Union, Dict
-
-from .engine import engine, dest_engine
 from pathlib import Path
+from xml.sax.saxutils import escape
 import json
 import pandas as pd
 import xml.etree.ElementTree as ET
+
+from .engine import engine, dest_engine
+from .vectorized_xml import records_to_xml
+
+try:
+    import orjson
+    HAS_ORJSON = True
+except ImportError:
+    HAS_ORJSON = False
+
+try:
+    import polars as pl
+    HAS_POLARS = True
+except ImportError:
+    HAS_POLARS = False
 
 
 class jEngine(engine):
@@ -13,41 +27,63 @@ class jEngine(engine):
                  mode: str,
                  *args, **kwargs
                  ):
-        super().__init__(source, mode, args, kwargs)
+        super().__init__(source, mode, *args, **kwargs)
 
     def read_file(self) -> Union[tuple[list[Any], list[dict[Any, Any]]], tuple[None, Any]]:
         """
-        Reading the JSON file.
-        We are using json module of python to read the data.
-        Upon reading we are flattening the data json object.
-        That will be easier to handle
-        While returning we are returning the headers and flatten_object all together
+        Reading the JSON file with SIMD acceleration (orjson) and stdlib fallback.
+        Flattens nested JSON structures into dot-notation dictionaries.
+        Returns a tuple of (headers, flatten_obj).
         """
-        with open(self.source) as json_file:
-            obj = json.load(json_file)
-        if type(obj) is dict:
+        obj = None
+        if HAS_ORJSON:
+            try:
+                with open(self.source, 'rb') as json_file:
+                    raw_bytes = json_file.read()
+                obj = orjson.loads(raw_bytes)
+            except Exception:
+                obj = None
+
+        if obj is None:
+            with open(self.source, 'r', encoding='utf-8') as json_file:
+                obj = json.load(json_file)
+
+        if isinstance(obj, dict):
             obj = [obj]
-        flatten_obj = []
-        for item in obj:
-            flatten_obj.append(self.flatten_json(item))
-        headers = list(set(key for entry in flatten_obj for key in entry.keys()))
+        elif not isinstance(obj, list):
+            obj = [obj]
+
+        flatten_obj = [self.flatten_json(item) for item in obj]
+
+        headers_set = set()
+        for entry in flatten_obj:
+            if isinstance(entry, dict):
+                headers_set.update(entry.keys())
+        headers = list(headers_set)
+
         return headers, flatten_obj
 
     @staticmethod
-    def flatten_json_util(json_obj, prefix, depth):
-        flat_dict = {}
+    def flatten_json_util(json_obj, prefix='_', depth=0, out_dict=None):
+        """
+        Optimized key-path flattening for hierarchical JSON.
+        Preserves dot-notation keys (e.g., 'c.d.0', 'c.e.f') and schema unions.
+        Directly populates an accumulator dict to avoid redundant intermediate
+        dictionary allocations and merge operations.
+        """
+        flat_dict = {} if out_dict is None else out_dict
         if isinstance(json_obj, dict):
             for key, value in json_obj.items():
-                _key = f"{prefix}{key}" if depth!=0 else key
+                _key = f"{prefix}{key}" if depth != 0 else key
                 if isinstance(value, (dict, list)):
-                    flat_dict.update(jEngine.flatten_json_util(value, _key + '.',depth+1))
+                    jEngine.flatten_json_util(value, f"{_key}.", depth + 1, flat_dict)
                 else:
                     flat_dict[_key] = value
         elif isinstance(json_obj, list):
             for i, item in enumerate(json_obj):
-                _key = f"{prefix}{i}" if depth!=0 else i
+                _key = f"{prefix}{i}" if depth != 0 else i
                 if isinstance(item, (dict, list)):
-                    flat_dict.update(jEngine.flatten_json_util(item, f"{_key}.",depth+1))
+                    jEngine.flatten_json_util(item, f"{_key}.", depth + 1, flat_dict)
                 else:
                     flat_dict[_key] = item
         else:
@@ -56,58 +92,115 @@ class jEngine(engine):
 
     def flatten_json(self, json_obj):
         """
-        Flatten method for json objects
+        Flatten method for json objects with fast-path for flat dictionaries.
         """
+        if isinstance(json_obj, dict):
+            # Fast-path: if no nested containers exist, shallow copy is sufficient
+            for v in json_obj.values():
+                if isinstance(v, (dict, list)):
+                    break
+            else:
+                return json_obj.copy()
+
         prefix = self.kwargs.get("prefix", '_')
         return self.flatten_json_util(json_obj, prefix, 0)
 
     @staticmethod
     def to_csv(obj):
         """
-        Static method to convert a json object into csv(pandas dataframe)
+        Convert flattened JSON records into tabular DataFrame with Polars acceleration.
         """
+        if HAS_POLARS:
+            try:
+                return pl.DataFrame(obj).to_pandas()
+            except Exception:
+                pass
         return pd.DataFrame(obj)
 
     @staticmethod
     def to_tsv(obj):
         """
-        Static method to convert a json object into tsv(pandas dataframe)
+        Convert flattened JSON records into tabular DataFrame for TSV serialization.
         """
         return jEngine.to_csv(obj)
 
     @staticmethod
     def to_xlsx(obj):
         """
-        Static method to convert a json object into xlsx(pandas dataframe)
+        Convert flattened JSON records into tabular DataFrame for XLSX serialization.
         """
         return jEngine.to_csv(obj)
 
     @staticmethod
+    def to_json(obj):
+        """
+        Returns JSON object representation (list of dicts).
+        """
+        return obj
+
+    @staticmethod
     def to_xml(obj, root=None):
         """
-        Static method to convert a json object into xml format(xml dataframe). Needs testing
+        Convert a JSON list-of-dicts into XML byte output with fast buffer formatting.
         """
-        if root is None:
-            root = "Result"
-        root = ET.Element(root)
-        for item in obj:
-            for key, value in item.items():
-                sub_element = ET.SubElement(root, key)
-                sub_element.text = str(value)
-        return ET.tostring(root)
+        return records_to_xml(obj, root=root)
 
 
 class dest_jEngine(dest_engine):
     def __init__(self, obj, destination, *args, **kwargs):
-        super().__init__(obj, destination, *args, kwargs)
+        super().__init__(obj, destination, *args, **kwargs)
 
     def to_destination(self):
         """
-        Will get a json object and convert that to a destination file
+        Converts in-memory JSON data to destination file.
+        Uses SIMD orjson for ultra-fast serialization with graceful fallback to json.dump.
         """
-        try:
-            self.obj = json.loads(self.obj)
-        except Exception as err:
-            print("Some Error occurred during json.loads. Ignoring...")
-        with open(self.destination, 'w+') as dest:
-            json.dump(self.obj, dest, indent=4)
+        data = self.obj
+        if isinstance(data, (str, bytes, bytearray)):
+            try:
+                if HAS_ORJSON:
+                    data = orjson.loads(data)
+                else:
+                    data = json.loads(data)
+            except Exception:
+                pass
+
+        if HAS_ORJSON:
+            try:
+                if isinstance(data, (dict, list)):
+                    payload = orjson.dumps(
+                        data,
+                        option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY,
+                        default=str
+                    )
+                    with open(self.destination, 'wb') as dest:
+                        dest.write(payload)
+                    return
+                elif isinstance(data, str):
+                    with open(self.destination, 'w', encoding='utf-8') as dest:
+                        dest.write(data)
+                    return
+                elif isinstance(data, (bytes, bytearray)):
+                    with open(self.destination, 'wb') as dest:
+                        dest.write(data)
+                    return
+                else:
+                    payload = orjson.dumps(
+                        data,
+                        option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY,
+                        default=str
+                    )
+                    with open(self.destination, 'wb') as dest:
+                        dest.write(payload)
+                    return
+            except Exception:
+                pass
+
+        # Fallback stdlib json serializer
+        with open(self.destination, 'w+', encoding='utf-8') as dest:
+            if isinstance(data, (dict, list)):
+                json.dump(data, dest, indent=4)
+            elif isinstance(data, str):
+                dest.write(data)
+            else:
+                json.dump(data, dest, indent=4)

@@ -14,18 +14,27 @@ the second function demonstrate the usage of the formatflick module
 
 
 def create_sample_json_file():
-    # call the api for json object
+    # call the api for json object or use fallback
     print("Call API for JSON object")
-    value = requests.get("http://universities.hipolabs.com/search?country=United+States")
-    print(f"Status Code: {value.status_code}")
+    data = None
+    try:
+        value = requests.get("http://universities.hipolabs.com/search?country=United+States", timeout=5)
+        print(f"Status Code: {value.status_code}")
+        if value.status_code == 200:
+            data = value.json()
+    except Exception as e:
+        print(f"Network request skipped or failed: {e}. Using local sample.")
 
-    if value.status_code != 200:
-        raise Exception("Some problem with the JSON API call. Check the JSON API")
+    if not data:
+        data = [
+            {"name": "Marywood University", "country": "United States", "web_pages": ["http://www.marywood.edu"]},
+            {"name": "Lindenwood University", "country": "United States", "web_pages": ["http://www.lindenwood.edu/"]}
+        ]
 
     # create the json file
     print("Creating the JSON file...")
     with open("sample.json", "w") as file:
-        json.dump(value.json(), file, indent=4)
+        json.dump(data, file, indent=4)
     print("JSON file creation done...")
 
 
@@ -50,14 +59,22 @@ def example_1():
 
 def create_sample_csv():
     print("Call API for CSV file")
-    url = 'https://www1.ncdc.noaa.gov/pub/data/cdo/samples/PRECIP_HLY_sample_csv.csv'
-    ret = requests.get(url)
-    print(f"Status Code: {ret.status_code}")
-    if ret.status_code != 200:
-        raise Exception("Some problem with CSV API call. Check the CSV API")
+    content = None
+    try:
+        url = 'https://www1.ncdc.noaa.gov/pub/data/cdo/samples/PRECIP_HLY_sample_csv.csv'
+        ret = requests.get(url, timeout=5)
+        print(f"Status Code: {ret.status_code}")
+        if ret.status_code == 200:
+            content = ret.content
+    except Exception as e:
+        print(f"Network request skipped or failed: {e}. Using local sample.")
+
+    if not content:
+        content = b"STATION,STATION_NAME,ELEVATION,LATITUDE,LONGITUDE,DATE,HPCP\nCOOP:010008,ABBEVILLE AL US,141.1,31.5702,-85.2482,19480701 01:00,0\n"
+
     print("Creating the csv file...")
     with open("sample.csv", "wb") as file:
-        file.write(ret.content)
+        file.write(content)
     print("CSV file creation done...")
 
 
@@ -95,7 +112,7 @@ def example_3():
 
 
 def remove_files():
-    for item in [".csv", ".json", "xml"]:
+    for item in [".csv", ".json", ".xml", ".tsv", ".xlsx"]:
         csv_files = glob.glob(f"*{item}")
         for file in csv_files:
             os.remove(file)

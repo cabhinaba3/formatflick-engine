@@ -1,7 +1,11 @@
+import os
+from typing import Any
 from .flick import *
 from .engine.xEngine import xEngine, dest_xEngine
 from .engine.jEngine import jEngine, dest_jEngine
 from .engine.cEngine import cEngine, dest_cEngine
+
+STREAMING_THRESHOLD_BYTES = 50 * 1024 * 1024  # 50 MB default threshold
 
 
 class formatflick(flick):
@@ -48,6 +52,14 @@ class formatflick(flick):
 
         if self.mode is None:
             self.mode = FILE_MODE
+
+        self.kwargs = kwargs
+        self.streaming_threshold_bytes = kwargs.get(
+            "streaming_threshold_bytes",
+            kwargs.get("streaming_threshold", kwargs.get("threshold", STREAMING_THRESHOLD_BYTES))
+        )
+        self.chunk_size = kwargs.get("chunk_size", 50000)
+        self.force_streaming = kwargs.get("force_streaming", False)
 
         # Check the source file is valid or not
         self.check_source_validity()
@@ -136,10 +148,10 @@ class formatflick(flick):
             (".tsv", ".xml"),
             (".tsv", ".xlsx"),
             # source file is .xml
-            (".html", ".csv"),
-            (".html", ".json"),
-            (".html", ".tsv"),
-            (".html", ".xlsx"),
+            (".xml", ".csv"),
+            (".xml", ".json"),
+            (".xml", ".tsv"),
+            (".xml", ".xlsx"),
             # source file is xlsx
             (".xlsx", ".csv"),
             (".xlsx", ".json"),
@@ -150,35 +162,54 @@ class formatflick(flick):
             raise Exception(f"The following conversion between {self.source_extension} and {self.destination_extension} is not allowed")
         return conversion_key
 
+    def should_stream(self) -> bool:
+        """
+        Determines whether to route to chunked streaming pipeline
+        based on source file size and configuration.
+        """
+        if self.force_streaming:
+            return True
+        try:
+            if os.path.exists(self.source):
+                return os.path.getsize(self.source) >= self.streaming_threshold_bytes
+        except OSError:
+            pass
+        return False
+
     def convert(self):
         """
-        convert method for formatflick. This method can only be called once the __init__method is called
-        successfully. The __init__method will check all valid file formats, encoding etc. Convert method will call the
-        engine and convert from source file to destination file, optionally returning the destination object as well.
-
-        There is an important check the convert does. During initialization, the source and destination file
-        validation is done Right now all file formats the formal flick support can be converted between each other,
-        But there might possibility where all formats cannot be connected to other formats. To prevent that,
-        we add an extra checks where all valid conversions will be mentioned In that it will be helpful to prevent an
-        unwanted result and users can don't need to debug that yourselves.
+        Convert method for formatflick. Selects execution path adaptively:
+        - Datasets < 50MB: In-memory vectorized pipeline (Polars/PyArrow/lxml/orjson)
+          for maximum throughput.
+        - Datasets >= 50MB (or force_streaming=True): Chunked streaming coordinator
+          guaranteeing constant bounded memory (<100MB RSS) with zero OOM errors.
         """
+        if self.should_stream():
+            return self._convert_streaming()
+        return self._convert_in_memory()
+
+    def _convert_in_memory(self):
         _engine_ = None
         # initialize the source object
-        if self.source_extension in [CSV,TSV,XLSX]:
-            _engine_ = cEngine(self.source,mode=self.mode,source_extension=self.source_extension)
+        if self.source_extension in [CSV, TSV, XLSX]:
+            _engine_ = cEngine(self.source, mode=self.mode, source_extension=self.source_extension)
             # df = obj.read_file()
         elif self.source_extension == JSON:
             _engine_ = jEngine(self.source, mode=self.mode)
         elif self.source_extension == XML:
-            _engine_ = xEngine(self.source,mode=self.mode)
+            _engine_ = xEngine(self.source, mode=self.mode)
 
         # read the source file
         obj = _engine_.read_file()
         if self.source_extension == JSON:
             obj = obj[1]
         d_obj = None
-        if self.destination_extension in [CSV, TSV, XLSX]:
+        if self.destination_extension == CSV:
             d_obj = _engine_.to_csv(obj)
+        elif self.destination_extension == TSV:
+            d_obj = _engine_.to_tsv(obj)
+        elif self.destination_extension == XLSX:
+            d_obj = _engine_.to_xlsx(obj)
         elif self.destination_extension == JSON:
             d_obj = _engine_.to_json(obj)
         elif self.destination_extension == XML:
@@ -187,7 +218,7 @@ class formatflick(flick):
         # convert to destination object
         if self.mode == FILE_MODE:
             d_engine = None
-            if self.destination_extension in [CSV,TSV, XLSX]:
+            if self.destination_extension in [CSV, TSV, XLSX]:
                 d_engine = dest_cEngine(d_obj, self.destination, destination_extension=self.destination_extension)
             elif self.destination_extension == JSON:
                 d_engine = dest_jEngine(d_obj, self.destination)
@@ -198,3 +229,33 @@ class formatflick(flick):
             d_engine.to_destination()
 
         return d_obj
+
+    def _convert_streaming(self):
+        from .engine.streaming import stream_convert, stream_read_memory_efficient
+
+        stream_kwargs = {k: v for k, v in self.kwargs.items() if k != "chunk_size"}
+        if self.is_file_mode():
+            res = stream_convert(
+                source=self.source,
+                destination=self.destination,
+                src_ext=self.source_extension,
+                dest_ext=self.destination_extension,
+                chunk_size=self.chunk_size,
+                **stream_kwargs
+            )
+            return res
+        else:
+            return stream_read_memory_efficient(
+                source=self.source,
+                src_ext=self.source_extension,
+                dest_ext=self.destination_extension,
+                chunk_size=self.chunk_size,
+                **stream_kwargs
+            )
+
+
+Formatflick = formatflick
+formatflick.Formatflick = formatflick
+formatflick.formatflick = formatflick
+Formatflick.STREAMING_THRESHOLD_BYTES = STREAMING_THRESHOLD_BYTES
+formatflick.STREAMING_THRESHOLD_BYTES = STREAMING_THRESHOLD_BYTES

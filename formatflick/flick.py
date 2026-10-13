@@ -19,7 +19,10 @@ class flick:
         self.verbosity: int = verbosity
 
         self.mode = kwargs.get("mode", None)
-        # self.log = log.logger(verbosity)
+        if self.verbosity is not None:
+            self.log = logger(self.verbosity)
+        else:
+            self.log = None
 
     @staticmethod
     def get_file_extension(file_path) -> str:
