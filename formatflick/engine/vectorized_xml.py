@@ -70,10 +70,10 @@ def dataframe_to_xml(df: pd.DataFrame, root: Any = 'Result', chunk_size: int = 5
         return f'<{root_name} />'.encode('utf-8')
 
     n_rows = len(df)
-    is_numeric_idx = pd.api.types.is_numeric_dtype(df.index)
 
     # In-memory single-shot vectorization for datasets within chunk_size
     if n_rows <= chunk_size:
+        is_numeric_idx = pd.api.types.is_numeric_dtype(df.index)
         if is_numeric_idx:
             row_ids = (df.index + 1).astype(str).fillna('nan')
         else:
@@ -84,17 +84,7 @@ def dataframe_to_xml(df: pd.DataFrame, root: Any = 'Result', chunk_size: int = 5
 
     # Chunked buffer concatenation for larger datasets (bounded memory)
     buf = io.BytesIO()
-    buf.write(f'<{root_name}>'.encode('utf-8'))
-    for start in range(0, n_rows, chunk_size):
-        chunk = df.iloc[start:start + chunk_size]
-        if is_numeric_idx:
-            row_ids = (chunk.index + 1).astype(str).fillna('nan')
-        else:
-            row_ids = pd.Series(range(start + 1, start + len(chunk) + 1), index=chunk.index, dtype=str)
-
-        buf.write(_format_chunk(chunk, row_ids).encode('utf-8'))
-
-    buf.write(f'</{root_name}>'.encode('utf-8'))
+    stream_dataframe_to_xml(df, buf, root=root_name, chunk_size=chunk_size)
     return buf.getvalue()
 
 

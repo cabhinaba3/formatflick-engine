@@ -1,9 +1,7 @@
-from typing import Tuple, List, Any, Union, Dict
+from typing import Any, Union
 from pathlib import Path
-from xml.sax.saxutils import escape
 import json
 import pandas as pd
-import xml.etree.ElementTree as ET
 
 from .engine import engine, dest_engine
 from .vectorized_xml import records_to_xml
@@ -48,9 +46,7 @@ class jEngine(engine):
             with open(self.source, 'r', encoding='utf-8') as json_file:
                 obj = json.load(json_file)
 
-        if isinstance(obj, dict):
-            obj = [obj]
-        elif not isinstance(obj, list):
+        if not isinstance(obj, list):
             obj = [obj]
 
         flatten_obj = [self.flatten_json(item) for item in obj]
@@ -147,9 +143,6 @@ class jEngine(engine):
 
 
 class dest_jEngine(dest_engine):
-    def __init__(self, obj, destination, *args, **kwargs):
-        super().__init__(obj, destination, *args, **kwargs)
-
     def to_destination(self):
         """
         Converts in-memory JSON data to destination file.
@@ -158,32 +151,18 @@ class dest_jEngine(dest_engine):
         data = self.obj
         if isinstance(data, (str, bytes, bytearray)):
             try:
-                if HAS_ORJSON:
-                    data = orjson.loads(data)
-                else:
-                    data = json.loads(data)
+                data = orjson.loads(data) if HAS_ORJSON else json.loads(data)
             except Exception:
                 pass
 
         if HAS_ORJSON:
             try:
-                if isinstance(data, (dict, list)):
-                    payload = orjson.dumps(
-                        data,
-                        option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY,
-                        default=str
-                    )
-                    with open(self.destination, 'wb') as dest:
-                        dest.write(payload)
-                    return
-                elif isinstance(data, str):
+                if isinstance(data, str):
                     with open(self.destination, 'w', encoding='utf-8') as dest:
                         dest.write(data)
-                    return
                 elif isinstance(data, (bytes, bytearray)):
                     with open(self.destination, 'wb') as dest:
                         dest.write(data)
-                    return
                 else:
                     payload = orjson.dumps(
                         data,
@@ -192,15 +171,15 @@ class dest_jEngine(dest_engine):
                     )
                     with open(self.destination, 'wb') as dest:
                         dest.write(payload)
-                    return
+                return
             except Exception:
                 pass
 
         # Fallback stdlib json serializer
         with open(self.destination, 'w+', encoding='utf-8') as dest:
-            if isinstance(data, (dict, list)):
-                json.dump(data, dest, indent=4)
-            elif isinstance(data, str):
+            if isinstance(data, str):
                 dest.write(data)
+            elif isinstance(data, (bytes, bytearray)):
+                dest.write(data.decode('utf-8'))
             else:
                 json.dump(data, dest, indent=4)

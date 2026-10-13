@@ -160,6 +160,20 @@ def iter_xlsx_chunks(source: Union[str, Path], chunk_size: int = DEFAULT_CHUNK_S
         yield pd.DataFrame()
         return
 
+    def _batch_rows(row_it, cols):
+        batch = []
+        yielded = False
+        for r in row_it:
+            batch.append(r)
+            if len(batch) >= chunk_size:
+                yield pd.DataFrame(batch, columns=cols)
+                yielded = True
+                batch = []
+        if batch:
+            yield pd.DataFrame(batch, columns=cols)
+        elif not yielded and cols:
+            yield pd.DataFrame(columns=cols)
+
     # Tier 1: python-calamine streaming iterator
     if HAS_CALAMINE:
         try:
@@ -172,16 +186,7 @@ def iter_xlsx_chunks(source: Union[str, Path], chunk_size: int = DEFAULT_CHUNK_S
                 yield pd.DataFrame()
                 return
             cols = [str(c) if c is not None and c != '' else f"col_{i}" for i, c in enumerate(header)]
-            batch = []
-            for r in it:
-                batch.append([None if c == '' else c for c in r])
-                if len(batch) >= chunk_size:
-                    yield pd.DataFrame(batch, columns=cols)
-                    batch = []
-            if batch:
-                yield pd.DataFrame(batch, columns=cols)
-            elif not batch and cols:
-                yield pd.DataFrame(columns=cols)
+            yield from _batch_rows(([None if c == '' else c for c in r] for r in it), cols)
             return
         except Exception:
             pass
@@ -199,16 +204,7 @@ def iter_xlsx_chunks(source: Union[str, Path], chunk_size: int = DEFAULT_CHUNK_S
                     yield pd.DataFrame()
                     return
                 cols = [str(h) if h is not None else f"col_{i}" for i, h in enumerate(header)]
-                batch = []
-                for r in rows:
-                    batch.append(list(r))
-                    if len(batch) >= chunk_size:
-                        yield pd.DataFrame(batch, columns=cols)
-                        batch = []
-                if batch:
-                    yield pd.DataFrame(batch, columns=cols)
-                elif not batch and cols:
-                    yield pd.DataFrame(columns=cols)
+                yield from _batch_rows((list(r) for r in rows), cols)
             finally:
                 wb.close()
             return
@@ -405,21 +401,7 @@ class XlsxStreamWriter:
                 return
             chunk = pd.DataFrame(chunk)
 
-        if chunk.empty and not chunk.columns.empty:
-            if not self.header_written:
-                headers = [str(c) for c in chunk.columns]
-                if self.use_xlsxwriter:
-                    self.ws.write_row(0, 0, headers)
-                    self.row_idx = 1
-                else:
-                    self.ws.append(headers)
-                self.header_written = True
-            return
-
-        if chunk.empty:
-            return
-
-        if not self.header_written:
+        if not self.header_written and not chunk.columns.empty:
             headers = [str(c) for c in chunk.columns]
             if self.use_xlsxwriter:
                 self.ws.write_row(0, 0, headers)
@@ -427,6 +409,9 @@ class XlsxStreamWriter:
             else:
                 self.ws.append(headers)
             self.header_written = True
+
+        if chunk.empty:
+            return
 
         if self.use_xlsxwriter:
             for row in chunk.itertuples(index=False):

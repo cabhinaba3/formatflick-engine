@@ -4,10 +4,8 @@ Supports high-throughput reading and writing for CSV, TSV, and XLSX using
 PyArrow, Polars, calamine, and xlsxwriter backends with seamless fallbacks.
 Preserves 100% backward compatibility and pandas.DataFrame return types.
 """
-from typing import Tuple, List, Any
+from typing import Any
 import pandas as pd
-from xml.sax.saxutils import escape
-import xml.etree.ElementTree as ET
 from .engine import engine, dest_engine
 from .vectorized_xml import dataframe_to_xml
 
@@ -59,31 +57,27 @@ class cEngine(engine):
         return pd.read_csv(self.source, delimiter=delimiter)
 
     @staticmethod
-    def to_csv(obj):
-        """Converts in-memory representation to tabular CSV DataFrame."""
+    def _to_dataframe(obj):
         if isinstance(obj, pd.DataFrame):
             return obj
         if hasattr(obj, "to_pandas"):
             return obj.to_pandas()
         return pd.DataFrame(obj)
+
+    @staticmethod
+    def to_csv(obj):
+        """Converts in-memory representation to tabular CSV DataFrame."""
+        return cEngine._to_dataframe(obj)
 
     @staticmethod
     def to_tsv(obj):
         """Converts in-memory representation to tabular TSV DataFrame."""
-        if isinstance(obj, pd.DataFrame):
-            return obj
-        if hasattr(obj, "to_pandas"):
-            return obj.to_pandas()
-        return pd.DataFrame(obj)
+        return cEngine._to_dataframe(obj)
 
     @staticmethod
     def to_xlsx(obj):
         """Converts in-memory representation to tabular XLSX DataFrame."""
-        if isinstance(obj, pd.DataFrame):
-            return obj
-        if hasattr(obj, "to_pandas"):
-            return obj.to_pandas()
-        return pd.DataFrame(obj)
+        return cEngine._to_dataframe(obj)
 
     @staticmethod
     def to_json(obj):
@@ -104,22 +98,7 @@ class cEngine(engine):
         <Result><1><col>val</col></1><2>...</2></Result>
         Accelerated using vectorized buffer formatting (vectorized_xml).
         """
-        if isinstance(obj, pd.DataFrame):
-            return dataframe_to_xml(obj, root=root)
-        try:
-            return dataframe_to_xml(pd.DataFrame(obj), root=root)
-        except Exception:
-            pass
-
-        # ElementTree fallback for non-DataFrame objects
-        root_name = "Result" if root is None else (root if isinstance(root, str) else getattr(root, "tag", str(root)))
-        root_element = ET.Element(root_name)
-        for i, row in obj.iterrows():
-            row_element = ET.SubElement(root_element, f"{i+1}")
-            for col_name, col_value in row.items():
-                col_element = ET.SubElement(row_element, str(col_name))
-                col_element.text = str(col_value)
-        return ET.tostring(root_element)
+        return dataframe_to_xml(cEngine._to_dataframe(obj), root=root)
 
 
 class dest_cEngine(dest_engine):
@@ -166,10 +145,8 @@ class dest_cEngine(dest_engine):
                     pass
 
             # Tier 3: Pandas native fallback (guaranteed compatibility)
-            if isinstance(self.obj, pd.DataFrame):
-                self.obj.to_csv(self.destination, index=False, sep=sep)
-            else:
-                pd.DataFrame(self.obj).to_csv(self.destination, index=False, sep=sep)
+            df = cEngine._to_dataframe(self.obj)
+            df.to_csv(self.destination, index=False, sep=sep)
 
         elif self.dest_extension == ".xlsx":
             # Tier 1: xlsxwriter engine (faster and bounded memory)
@@ -181,7 +158,5 @@ class dest_cEngine(dest_engine):
                 pass
 
             # Tier 2: openpyxl fallback
-            if isinstance(self.obj, pd.DataFrame):
-                self.obj.to_excel(self.destination, index=False)
-            else:
-                pd.DataFrame(self.obj).to_excel(self.destination, index=False)
+            df = cEngine._to_dataframe(self.obj)
+            df.to_excel(self.destination, index=False)

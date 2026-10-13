@@ -1,4 +1,4 @@
-from typing import Any, Dict, Union, Optional
+from typing import Any
 from .engine import engine, dest_engine
 from .jEngine import jEngine
 from pathlib import Path
@@ -82,17 +82,17 @@ def lxml_parse_to_dict(source) -> dict:
     Transparently supports FormatFlick self-generated XML containing numeric element tags.
     """
     parser = ET.XMLParser(remove_comments=True)
+    root = None
     if isinstance(source, (str, Path, os.PathLike)) and os.path.exists(source):
         try:
-            tree = ET.parse(str(source), parser=parser)
-            root = tree.getroot()
+            root = ET.parse(str(source), parser=parser).getroot()
         except ET.XMLSyntaxError:
             with open(source, "rb") as f:
                 content = f.read()
-            sanitized = NUM_TAG_BYTES_REGEX.sub(rb"<\1" + TAG_NUM_PREFIX + rb"\2\3", content)
-            root = ET.fromstring(sanitized, parser=parser)
     else:
         content = source.encode('utf-8') if isinstance(source, str) else source
+
+    if root is None:
         try:
             root = ET.fromstring(content, parser=parser)
         except ET.XMLSyntaxError:
@@ -101,8 +101,7 @@ def lxml_parse_to_dict(source) -> dict:
 
     qname = ET.QName(root)
     root_tag = f'{root.prefix}:{qname.localname}' if root.prefix else qname.localname
-    root_tag = _desanitize_tag(root_tag)
-    return {root_tag: _element_to_dict(root)}
+    return {_desanitize_tag(root_tag): _element_to_dict(root)}
 
 
 class xEngine(engine):
@@ -147,10 +146,10 @@ class xEngine(engine):
     def to_csv(obj):
         if isinstance(obj, dict) and len(obj) == 1:
             root_val = next(iter(obj.values()))
-            if isinstance(root_val, dict) and len(root_val) > 1:
+            if isinstance(root_val, dict) and len(root_val) >= 1:
                 first_k = next(iter(root_val.keys()))
                 first_v = next(iter(root_val.values()))
-                if isinstance(first_v, dict) and (first_k.isdigit() or all(isinstance(v, dict) for v in root_val.values())):
+                if isinstance(first_v, dict) and (first_k.isdigit() or (len(root_val) > 1 and all(isinstance(v, dict) for v in root_val.values()))):
                     flat_rows = [jEngine.flatten_json_util(v) if isinstance(v, (dict, list)) else v for v in root_val.values()]
                     return pd.DataFrame(flat_rows)
             elif isinstance(root_val, list) and all(isinstance(v, dict) for v in root_val):
@@ -180,9 +179,6 @@ class xEngine(engine):
 
 
 class dest_xEngine(dest_engine):
-    def __init__(self, obj, destination, *args, **kwargs):
-        super().__init__(obj, destination, *args, **kwargs)
-
     def to_destination(self):
         data = self.obj
         if isinstance(data, (bytes, bytearray)):

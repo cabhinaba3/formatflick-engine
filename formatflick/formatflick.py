@@ -1,11 +1,15 @@
 import os
 from typing import Any
-from .flick import *
+from .flick import flick
+from .global_var import CSV, TSV, XLSX, JSON, XML, VALID_EXTENSIONS, RESULT_FILE, FILE_MODE, NFILE_MODE
 from .engine.xEngine import xEngine, dest_xEngine
 from .engine.jEngine import jEngine, dest_jEngine
 from .engine.cEngine import cEngine, dest_cEngine
 
 STREAMING_THRESHOLD_BYTES = 50 * 1024 * 1024  # 50 MB default threshold
+VALID_CONVERSION_KEYS = frozenset((s, d) for s in VALID_EXTENSIONS for d in VALID_EXTENSIONS if s != d)
+SRC_ENGINE_MAP = {CSV: cEngine, TSV: cEngine, XLSX: cEngine, JSON: jEngine, XML: xEngine}
+DEST_ENGINE_MAP = {CSV: dest_cEngine, TSV: dest_cEngine, XLSX: dest_cEngine, JSON: dest_jEngine, XML: dest_xEngine}
 
 
 class formatflick(flick):
@@ -83,10 +87,7 @@ class formatflick(flick):
         if not os.path.exists(self.source):
             raise Exception("The source path dont exits")
         self.source_extension = super().get_file_extension(self.source)
-        if not self.is_valid_file_extension(self.source_extension):
-            raise Exception(
-                f"{self.source} do not have the valid extension"
-            )
+        super().is_valid_file_extension(self.source_extension)
 
     def check_destination_validity(self) -> None:
         """
@@ -104,61 +105,23 @@ class formatflick(flick):
             Destination Path will be ignored
         """
         if self.is_file_mode():
-            # Check if the destination and destination_extension both are none or not
             if self.destination is None and self.destination_extension is None:
                 raise Exception("destination and destination_extension both cannot be None.")
-            # At this point, one of them is not none
-            # to Consider self.destination is None
             elif self.destination is None:
-                # Check self.destination_extension is a valid destination of not
-                is_valid = super().is_valid_file_extension(self.destination_extension)
-                if is_valid:
-                    # form the destination file path, with "results" name
-                    self.destination = os.path.join(os.getcwd(), "result"+self.destination_extension)
+                super().is_valid_file_extension(self.destination_extension)
+                self.destination = os.path.join(os.getcwd(), RESULT_FILE + self.destination_extension)
             else:
-                # At this point, the self.destination is not none
                 self.destination_extension = super().get_file_extension(self.destination)
-                # The destination extension returned contains "." as prefix
-                if not self.is_valid_file_extension(self.destination_extension):
-                    raise Exception(
-                        f"{self.destination_extension} is not valid. The valid extensions are {VALID_EXTENSIONS}"
-                    )
+                super().is_valid_file_extension(self.destination_extension)
         else:
             if self.destination_extension is None:
                 raise Exception("destination_extension cannot be None for nfile mode")
             else:
-                _ = super().is_valid_file_extension(self.destination_extension)
+                super().is_valid_file_extension(self.destination_extension)
 
     def is_valid_conversion(self):
         conversion_key = (self.source_extension, self.destination_extension)
-        function_call_map = [
-            #  source file is json
-            (".json", ".csv"),
-            (".json", ".tsv"),
-            (".json", ".xml"),
-            (".json", ".xlsx"),
-            # source file is .csv
-            (".csv", ".json"),
-            (".csv", ".tsv"),
-            (".csv", ".xml"),
-            (".csv", ".xlsx"),
-            # source file is .tsv
-            (".tsv", ".csv"),
-            (".tsv", ".json"),
-            (".tsv", ".xml"),
-            (".tsv", ".xlsx"),
-            # source file is .xml
-            (".xml", ".csv"),
-            (".xml", ".json"),
-            (".xml", ".tsv"),
-            (".xml", ".xlsx"),
-            # source file is xlsx
-            (".xlsx", ".csv"),
-            (".xlsx", ".json"),
-            (".xlsx", ".tsv"),
-            (".xlsx", ".xml")
-        ]
-        if conversion_key not in function_call_map:
+        if conversion_key not in VALID_CONVERSION_KEYS:
             raise Exception(f"The following conversion between {self.source_extension} and {self.destination_extension} is not allowed")
         return conversion_key
 
@@ -189,43 +152,19 @@ class formatflick(flick):
         return self._convert_in_memory()
 
     def _convert_in_memory(self):
-        _engine_ = None
-        # initialize the source object
-        if self.source_extension in [CSV, TSV, XLSX]:
-            _engine_ = cEngine(self.source, mode=self.mode, source_extension=self.source_extension)
-            # df = obj.read_file()
-        elif self.source_extension == JSON:
-            _engine_ = jEngine(self.source, mode=self.mode)
-        elif self.source_extension == XML:
-            _engine_ = xEngine(self.source, mode=self.mode)
+        engine_cls = SRC_ENGINE_MAP[self.source_extension]
+        _engine_ = engine_cls(self.source, mode=self.mode, source_extension=self.source_extension)
 
-        # read the source file
         obj = _engine_.read_file()
         if self.source_extension == JSON:
             obj = obj[1]
-        d_obj = None
-        if self.destination_extension == CSV:
-            d_obj = _engine_.to_csv(obj)
-        elif self.destination_extension == TSV:
-            d_obj = _engine_.to_tsv(obj)
-        elif self.destination_extension == XLSX:
-            d_obj = _engine_.to_xlsx(obj)
-        elif self.destination_extension == JSON:
-            d_obj = _engine_.to_json(obj)
-        elif self.destination_extension == XML:
-            d_obj = _engine_.to_xml(obj)
 
-        # convert to destination object
+        convert_method = getattr(_engine_, f"to_{self.destination_extension[1:]}")
+        d_obj = convert_method(obj)
+
         if self.mode == FILE_MODE:
-            d_engine = None
-            if self.destination_extension in [CSV, TSV, XLSX]:
-                d_engine = dest_cEngine(d_obj, self.destination, destination_extension=self.destination_extension)
-            elif self.destination_extension == JSON:
-                d_engine = dest_jEngine(d_obj, self.destination)
-            elif self.destination_extension == XML:
-                d_engine = dest_xEngine(d_obj, self.destination)
-
-            # convert to destination obj
+            dest_cls = DEST_ENGINE_MAP[self.destination_extension]
+            d_engine = dest_cls(d_obj, self.destination, destination_extension=self.destination_extension)
             d_engine.to_destination()
 
         return d_obj
@@ -258,4 +197,3 @@ Formatflick = formatflick
 formatflick.Formatflick = formatflick
 formatflick.formatflick = formatflick
 Formatflick.STREAMING_THRESHOLD_BYTES = STREAMING_THRESHOLD_BYTES
-formatflick.STREAMING_THRESHOLD_BYTES = STREAMING_THRESHOLD_BYTES

@@ -39,19 +39,17 @@ class logger:
 
         Be sure to put verb as 0 to 3. Failing to do so with raise an exception
         """
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(formatter)
         self.logger = logging.getLogger('project_logger')
 
         if log_level_map.get(verb, None) is None:
             raise Exception(f"{verb} should be between 0 to 3")
         self.level = log_level_map.get(verb, None)
-        # if self.level is None:
-        #     raise Exception(f"Please send verb")
-
         self.logger.setLevel(self.level)
-        self.logger.addHandler(stream_handler)
+        if not self.logger.handlers:
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+            stream_handler = logging.StreamHandler(sys.stdout)
+            stream_handler.setFormatter(formatter)
+            self.logger.addHandler(stream_handler)
 
     # Utility function for getting log messages
     def log_unsupported_file_conversion_error(self, source, destination):

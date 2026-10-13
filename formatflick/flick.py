@@ -1,7 +1,7 @@
 import os
 
-from .global_var import *
-from .logger import *
+from .global_var import FILE_MODE, VALID_EXTENSIONS
+from .logger import logger
 
 
 class flick:

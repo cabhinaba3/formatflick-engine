@@ -170,3 +170,6 @@ examples/sample.*
 examples/result.*
 
 requirements.txt
+.*/
+*.md
+!README.md
